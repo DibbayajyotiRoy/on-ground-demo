@@ -79,6 +79,13 @@ npm run build && npm start  # serves dist/ + API on PORT (default 3001)
 4. Trial accounts may need to verify outbound destinations and enable India/geo
    permissions on the outbound profile — check the portal before demoing.
 
+> **Trial-tier accounts:** Telnyx gates the telephony-credential token API behind a
+> paid upgrade (API error 10038). The demo detects this and falls back to direct
+> WebRTC login with a SIP username/password: add `TELNYX_SIP_USERNAME` and
+> `TELNYX_SIP_PASSWORD` (Portal → Voice → SIP Connections → your connection →
+> Credentials) to `.env` instead. Outbound calls still need a number on the
+> connection and a destination-enabled outbound voice profile.
+
 ## Scripts
 
 | Command | Purpose |
