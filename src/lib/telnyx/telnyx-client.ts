@@ -21,6 +21,8 @@ const callStateMap: Record<string, CallInfo['phase'] | undefined> = {
 
 export class TelnyxTelephonyClient implements TelephonyClient {
   private rtc: TelnyxRTC | null = null
+  private rtcReady = false
+  private readyWaiters: { resolve: () => void; reject: (err: Error) => void }[] = []
   private activeCall: INotification['call'] | null = null
   private state: CallInfo
   private durationTimer: ReturnType<typeof setInterval> | null = null
@@ -139,11 +141,38 @@ export class TelnyxTelephonyClient implements TelephonyClient {
     this.rtc.remoteElement = this.remoteElement!
 
     this.rtc
-      .on('telnyx.ready', () => this.emit({ phase: 'ready' }))
-      .on('telnyx.error', (event) => this.emit({ phase: 'failed', error: event?.error?.message || 'Telnyx error' }))
+      .on('telnyx.ready', () => {
+        this.rtcReady = true
+        this.emit({ phase: 'ready' })
+        this.readyWaiters.forEach((w) => w.resolve())
+        this.readyWaiters = []
+      })
+      .on('telnyx.error', (event) => {
+        const err = new Error(event?.error?.message || 'Telnyx error')
+        if (!this.rtcReady) {
+          this.readyWaiters.forEach((w) => w.reject(err))
+          this.readyWaiters = []
+        }
+        this.emit({ phase: 'failed', error: err.message })
+      })
       .on('telnyx.notification', (notification) => this.handleNotification(notification))
 
     await this.rtc.connect()
+
+    // newCall() before the gateway registration completes is rejected by
+    // Telnyx with USER_BUSY, so wait for telnyx.ready before resolving.
+    if (!this.rtcReady) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.readyWaiters = this.readyWaiters.filter((w) => w.resolve !== resolve)
+          reject(new Error('Timed out waiting for Telnyx registration'))
+        }, 12000)
+        this.readyWaiters.push({
+          resolve: () => { clearTimeout(timer); resolve() },
+          reject: (err) => { clearTimeout(timer); reject(err) },
+        })
+      })
+    }
   }
 
   disconnect() {
