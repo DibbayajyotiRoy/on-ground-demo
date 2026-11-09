@@ -7,6 +7,15 @@ Telnyx WebRTC.
 
 **Live demo:** https://on-ground-demo.vercel.app (passcode: ask the demo operator)
 
+## Demo — real phone call from the browser
+
+The app dials an Indian mobile (+91 8731953807) from the browser. Telnyx rejects the
+destination at trial tier (D13), so the app **automatically fails over to Twilio**'s
+verified-number path and connects — 30 seconds of live PSTN audio with the in-app timer
+running.
+
+<video src="docs/demo-call.mp4" controls autoplay muted playsinline></video>
+
 ## Assignment requirements → where they live
 
 | OnGround requirement | Status | Where |
