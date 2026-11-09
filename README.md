@@ -1,114 +1,76 @@
 # On-Ground.ai — Call Centre Demo
 
-A browser-based call-centre workspace for a mattress retail sales agent, built for the
-On-Ground engineering assignment. Agents get a daily brief, a ranked calling plan, lead
-profiles, a calendar, and a team-chat pulse view — and can place **real telephone calls**
-from the browser via Telnyx WebRTC.
+Browser-based call-centre workspace for a retail sales agent, built for the On-Ground
+engineering assignment. Agents get a daily brief, ranked calling plan, lead profiles,
+calendar, and team chat — and can make **real phone calls from the browser** via
+Telnyx WebRTC.
+
+**Live demo:** https://on-ground-demo.vercel.app (passcode: ask the demo operator)
 
 ## What's real vs. mocked
 
-| Area | Status |
-| --- | --- |
-| Browser → PSTN phone calls (place, ring, answer audio, mute, hold, hang up, duration) | **Real** — Telnyx WebRTC |
-| Telephony credentials & API keys | Server-side only, never in the bundle |
-| Dashboard KPIs, leads, tasks, calendar events, pulse messages | Mocked practice data (clearly labelled) |
+- **Real:** browser ↔ PSTN calls (dial, ring, two-way audio, mute, hold, timer) via
+  Telnyx WebRTC; SIP login/token flow; call states.
+- **Mocked:** KPIs, leads, tasks, calendar, pulse messages (practice data).
 
-A failed or unauthenticated call always shows an honest **failed** state — the demo never
-pretends a call connected.
+A failed call always shows an honest **failed** state — the demo never fakes "connected".
 
 ## Stack
 
-- **Frontend:** React 19 + TypeScript + Vite, Tailwind CSS v4, shadcn/ui (Base UI), Recharts
-- **Telephony:** `@telnyx/webrtc` (SIP credential login tokens minted by the backend)
-- **Backend:** Express 5 (`server/index.mjs`) — token endpoint with passcode gate, rate
-  limiting, helmet, zod validation; serves the built SPA in production
-- **Data:** local mock modules + `localStorage` (pulse channels persist across reloads)
-
-## Architecture
+React 19 + TypeScript + Vite · Tailwind v4 + shadcn/ui (Base UI) + Recharts ·
+Express API (`server/`, runs as Vercel serverless functions) · `@telnyx/webrtc` ·
+mock data in `localStorage`.
 
 ```
-Browser (React)                Express server (Node)              Telnyx
-────────────────────────────────────────────────────────────────────────────
-Place call ──► POST /api/telephony/token (passcode) ──► mints WebRTC login token
-      │                                                   (TELNYX_API_KEY +
-      ◄── short-lived JWT ◄──                             credential ID)
-TelnyxRTC connects with login_token, places call to target.phone (E.164)
-SDK call-state notifications ──► CallInfo state ──► banner + plan screen
+Browser ──POST /api/telephony/* (passcode-gated)──► Server ──► Telnyx (SIP creds / token)
+Browser ◄──────── SIP login / WebRTC login token ◄─────────────┘
+TelnyxRTC ◄─────────────────── call signaling / audio ────────────────────► Telnyx ◄─► PSTN
 ```
 
-- `src/lib/call-types.ts` — provider-agnostic `TelephonyClient`/`TelephonyProvider`
-  interfaces, so Plivo (or another WebRTC SIP provider) can be swapped in without
-  touching UI code.
-- `src/lib/telnyx/` — Telnyx implementation (SDK state machine → `CallInfo` phases,
-  duration timer, mute/hold toggles, remote/local audio elements).
-- `src/App.tsx` — app shell (sidebar + mobile tab bar), passcode dialog, call lifecycle
-  wiring shared by all screens.
+- `server/app.mjs` — Express app: `/api/telephony/token` (paid accounts) and
+  `/api/telephony/sip-credentials` (trial accounts; Telnyx gates the token API behind
+  an upgrade — error 10038). Passcode-gated, rate-limited, helmet, zod.
+- `src/lib/telnyx/` — provider-agnostic `TelephonyClient` + Telnyx implementation.
+  `connect()` waits for `telnyx.ready` before dialing (prevents USER_BUSY rejects).
+- `src/App.tsx` — shell (sidebar + mobile tabs), passcode dialog, call wiring.
+- `src/features/` — Dashboard, Plan (keypad, wrap-up), Calendar, Pulse, Leads.
 
-## Security notes
+## Security
 
-- The Telnyx API key **never reaches the browser**; the frontend only receives a
-  short-lived WebRTC login token, gated behind `DEMO_PASSCODE` and rate-limited
-  (20 requests / 15 min / IP).
-- Because a browser holding a WebRTC token can dial any number the outbound profile
-  allows, also restrict destinations and set a daily spend cap in the **Telnyx portal**
-  (Outbound Voice Profile) before sharing a public URL.
+- Telnyx API key and SIP credentials **never reach the client bundle** — the browser
+  gets at most a short-lived WebRTC login token or the SIP user/pass, both gated
+  behind `DEMO_PASSCODE` + rate limit.
+- Restrict destinations + set a spend cap on the Telnyx Outbound Voice Profile before
+  sharing the URL (a WebRTC client can dial any number the profile allows).
 
-## Getting started
+## Run locally
 
 ```bash
 npm install
-cp .env.example .env        # fill in DEMO_PASSCODE + Telnyx values
-npm run dev:all             # Vite (5173) + API server (3001), /api proxied
+cp .env.example .env   # fill in: DEMO_PASSCODE, TELNYX_API_KEY,
+                       # TELNYX_SIP_USERNAME / TELNYX_SIP_PASSWORD (trial)
+npm run dev:all          # app :5173, api :3001
 ```
 
-Open http://localhost:5173, go to **Plan**, hit **Place call** on a lead, and enter the
-demo passcode when prompted.
+Scripts: `dev` (vite) · `dev:server` (api) · `dev:all` · `build` · `start` (serve dist+api) · `lint`.
 
-For a production-style run:
+## Telnyx setup (5 min)
 
-```bash
-npm run build && npm start  # serves dist/ + API on PORT (default 3001)
-```
-
-### Telnyx setup (summary)
-
-1. Create a Telnyx account, buy/provision a number, and enable **Voice**.
-2. Create a **SIP Credential Connection** (WebRTC) and a telephony credential for the
-   agent; note the credential ID.
-3. Copy `TELNYX_API_KEY`, `TELNYX_TELEPHONY_CREDENTIAL_ID`, and `DEMO_PASSCODE` into `.env`.
-4. Trial accounts may need to verify outbound destinations and enable India/geo
-   permissions on the outbound profile — check the portal before demoing.
-
-> **Trial-tier accounts:** Telnyx gates the telephony-credential token API behind a
-> paid upgrade (API error 10038). The demo detects this and falls back to direct
-> WebRTC login with a SIP username/password: add `TELNYX_SIP_USERNAME` and
-> `TELNYX_SIP_PASSWORD` (Portal → Voice → SIP Connections → your connection →
-> Credentials) to `.env` instead. Outbound calls still need a number on the
-> connection and a destination-enabled outbound voice profile.
-
-## Scripts
-
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Vite dev server only |
-| `npm run dev:server` | API server only |
-| `npm run dev:all` | Both, concurrently |
-| `npm run build` | Type-check + production build |
-| `npm run start` | Serve production build + API |
-| `npm run lint` | oxlint |
+1. Portal → **Voice → SIP Connections** → add a **Credentials** connection.
+2. On it → **Credentials** tab → add a user/pass → put them in `.env`.
+3. **Numbers** → buy a number → assign it to the connection (caller ID).
+4. **Voice → Outbound Voice Profiles** → enable the countries you'll call.
+5. Trial tier: US/CA/AU/SG/DE/FR/NL/JP/HK allowed; **India needs a card on file**
+   (pay-as-you-go, no monthly fee). Indian numbers require DoT-KYC providers
+   (Exotel/CallHippo) — hence the US-number demo path.
 
 ## Screens
 
-- **Dashboard** — daily brief, KPIs, progress, earnings, waiting leads, tasks, 7-day
-  charts, quick dial.
-- **Plan** — ranked calls-to-make with lead details, missed-call prioritisation, recent
-  calls with outcomes/SOP scores, dial keypad, live call status, wrap-up review.
-- **Calendar** — month view with events; call events link back to leads.
-- **Pulse** — team channels, kudos, custom agents, AvaniBot brief/Q&A (local mock).
-- **Leads** — swipeable lead profiles with ICP/intent/expected value, journey and buying
-  signals.
+**Dashboard** (brief, KPIs, charts, quick dial) · **Plan** (ranked leads, missed-call
+priorities, recent calls, keypad, live call status) · **Calendar** (month view, call
+events) · **Pulse** (team channels, kudos, bot) · **Leads** (profiles, scores, journey).
 
-## Future work (out of current scope)
+## Not built (out of scope)
 
-- Pipecat voice-AI agent for the "practice a call" flow (optional per assignment).
-- Plivo provider adapter (interface already in place).
+Pipecat voice-AI agent · Plivo adapter (interface ready) · India outbound without
+card.
