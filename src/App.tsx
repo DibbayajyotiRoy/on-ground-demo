@@ -138,7 +138,7 @@ export default function App() {
   // retry once through Twilio, which dials verified numbers on trial.
   useEffect(() => {
     if (call.phase !== 'failed' || !call.target || !call.error) return
-    if (!/whitelisted|non-verified|D13|D60/i.test(call.error)) return
+    if (!/whitelisted|non-verified|not found|D\d{2}|busy|unreachable|invalid/i.test(call.error)) return
     if (twilioTriedRef.current?.phone === call.target.phone) return
     twilioTriedRef.current = call.target
     setCall((c) => ({ ...c, error: undefined, phase: 'connecting' }))
