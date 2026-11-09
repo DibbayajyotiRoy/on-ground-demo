@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import type { AppView, CallTarget } from '@/lib/types'
 import { initialCallState, type CallInfo, type TelephonyClient } from '@/lib/call-types'
 import { createTelnyxProvider } from '@/lib/telnyx/telnyx-provider'
+import { TwilioTelephonyClient } from '@/lib/twilio/twilio-client'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS: { view: AppView; label: string; icon: typeof LayoutDashboard }[] = [
@@ -60,6 +61,20 @@ const provider = createTelnyxProvider(async () => {
   return { loginToken: data.token }
 })
 
+async function getTwilioToken(): Promise<string> {
+  const passcode = sessionStorage.getItem(PASSCODE_KEY)
+  if (!passcode) throw new Error('Demo passcode required')
+  const res = await postJson('/api/twilio/token', passcode)
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    if (res.status === 401) sessionStorage.removeItem(PASSCODE_KEY)
+    throw new Error(body?.error ?? `Twilio token request failed (${res.status})`)
+  }
+  const data = (await res.json()) as { token?: string }
+  if (!data.token) throw new Error('No Twilio token in response')
+  return data.token
+}
+
 export default function App() {
   const [view, setView] = useState<AppView>('dashboard')
   const [call, setCall] = useState<CallInfo>(initialCallState)
@@ -71,6 +86,8 @@ export default function App() {
   const [pendingTarget, setPendingTarget] = useState<CallTarget | null>(null)
 
   const clientRef = useRef<TelephonyClient | null>(null)
+  const twilioClientRef = useRef<TelephonyClient | null>(null)
+  const twilioTriedRef = useRef<CallTarget | null>(null)
   const callRef = useRef(call)
   useEffect(() => {
     callRef.current = call
@@ -85,21 +102,29 @@ export default function App() {
     setLeadsOpen(true)
   }, [])
 
-  const initiateCall = useCallback(async (target: CallTarget) => {
+  const initiateCall = useCallback(async (target: CallTarget, via: 'telnyx' | 'twilio' = 'telnyx') => {
     setView('plan')
     try {
-      if (!clientRef.current) {
-        clientRef.current = provider.createClient(setCall)
+      const isTwilio = via === 'twilio'
+      let client = isTwilio ? twilioClientRef.current : clientRef.current
+      if (!client) {
+        client = isTwilio
+          ? new TwilioTelephonyClient(getTwilioToken, setCall)
+          : provider.createClient(setCall)
+        if (isTwilio) twilioClientRef.current = client
+        else clientRef.current = client
       }
-      const client = clientRef.current
       if (import.meta.env.DEV) {
         ;(window as unknown as Record<string, unknown>).__telephony = client
       }
-      if (callRef.current.phase === 'idle' || callRef.current.phase === 'failed' || callRef.current.phase === 'ended' || callRef.current.phase === 'ready') {
-        await client.connect()
-      }
+      await client.connect()
       await client.call(target)
     } catch (err) {
+      if (via === 'telnyx') {
+        // Telnyx unavailable (e.g. credential issue) — try Twilio once.
+        twilioTriedRef.current = target
+        return initiateCall(target, 'twilio')
+      }
       setCall((c) => ({
         ...c,
         phase: 'failed',
@@ -109,10 +134,22 @@ export default function App() {
     }
   }, [])
 
+  // Telnyx connected but rejected the destination (trial geo/verified limits) —
+  // retry once through Twilio, which dials verified numbers on trial.
+  useEffect(() => {
+    if (call.phase !== 'failed' || !call.target || !call.error) return
+    if (!/whitelisted|non-verified|D13|D60/i.test(call.error)) return
+    if (twilioTriedRef.current?.phone === call.target.phone) return
+    twilioTriedRef.current = call.target
+    setCall((c) => ({ ...c, error: undefined, phase: 'connecting' }))
+    void initiateCall(call.target, 'twilio')
+  }, [call, initiateCall])
+
   const startCall = useCallback((target: CallTarget) => {
     if (callRef.current.phase === 'active' || callRef.current.phase === 'ringing' || callRef.current.phase === 'incoming') {
       return
     }
+    twilioTriedRef.current = null
     if (!sessionStorage.getItem(PASSCODE_KEY)) {
       setPendingTarget(target)
       setPasscodeInput('')

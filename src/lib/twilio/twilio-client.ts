@@ -3,7 +3,7 @@
 // accounts can call numbers the owner has verified, which unlocks dialling the
 // demo operator's own phone.
 
-import { Device } from '@twilio/voice-sdk'
+import { Call, Device } from '@twilio/voice-sdk'
 import type { Call as TwilioCall } from '@twilio/voice-sdk'
 import type { CallInfo, TelephonyClient } from '../call-types'
 import type { CallTarget } from '../types'
@@ -19,10 +19,15 @@ export class TwilioTelephonyClient implements TelephonyClient {
   private localElement: HTMLMediaElement | null = null
   private remoteElement: HTMLMediaElement | null = null
 
+  private getToken: () => Promise<string>
+  private onState: (state: CallInfo) => void
+
   constructor(
-    private getToken: () => Promise<string>,
-    private onState: (state: CallInfo) => void,
+    getToken: () => Promise<string>,
+    onState: (state: CallInfo) => void,
   ) {
+    this.getToken = getToken
+    this.onState = onState
     this.state = {
       phase: 'idle',
       direction: 'outgoing',
@@ -116,7 +121,7 @@ export class TwilioTelephonyClient implements TelephonyClient {
     this.ensureAudioElements()
 
     this.device = new Device(token, {
-      codecPreferences: [Device.Codec.Opus, Device.Codec.PCMU],
+      codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
       // Allow incoming (from verified callers dialling the Twilio number).
       closeProtection: false,
     })
