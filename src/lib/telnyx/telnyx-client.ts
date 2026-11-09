@@ -1,0 +1,197 @@
+import { TelnyxRTC } from '@telnyx/webrtc'
+import type { INotification } from '@telnyx/webrtc'
+import type { CallInfo, TelephonyClient } from '../call-types'
+import type { CallTarget } from '../types'
+
+const callStateMap: Record<string, CallInfo['phase'] | undefined> = {
+  new: 'connecting',
+  requesting: 'connecting',
+  trying: 'connecting',
+  recovering: 'connecting',
+  ringing: 'ringing',
+  answering: 'connecting',
+  early: 'ringing',
+  active: 'active',
+  held: 'active',
+  hangup: 'ended',
+  destroy: 'ended',
+  purge: 'ended',
+}
+
+export class TelnyxTelephonyClient implements TelephonyClient {
+  private rtc: TelnyxRTC | null = null
+  private activeCall: INotification['call'] | null = null
+  private state: CallInfo
+  private durationTimer: ReturnType<typeof setInterval> | null = null
+  private localElement: HTMLMediaElement | null = null
+  private remoteElement: HTMLMediaElement | null = null
+
+  private getToken: () => Promise<string>
+  private onState: (state: CallInfo) => void
+
+  constructor(
+    getToken: () => Promise<string>,
+    onState: (state: CallInfo) => void,
+  ) {
+    this.getToken = getToken
+    this.onState = onState
+    this.state = {
+      phase: 'idle',
+      direction: 'outgoing',
+      durationSeconds: 0,
+      muted: false,
+      held: false,
+    }
+  }
+
+  private emit(update: Partial<CallInfo>) {
+    this.state = { ...this.state, ...update }
+    this.onState({ ...this.state })
+  }
+
+  private ensureAudioElements() {
+    if (!this.localElement) {
+      this.localElement = document.createElement('audio')
+      this.localElement.autoplay = true
+      this.localElement.muted = true
+      document.body.appendChild(this.localElement)
+    }
+    if (!this.remoteElement) {
+      this.remoteElement = document.createElement('audio')
+      this.remoteElement.autoplay = true
+      document.body.appendChild(this.remoteElement)
+    }
+  }
+
+  private removeAudioElements() {
+    if (this.localElement) {
+      this.localElement.remove()
+      this.localElement = null
+    }
+    if (this.remoteElement) {
+      this.remoteElement.remove()
+      this.remoteElement = null
+    }
+  }
+
+  private startDurationTimer() {
+    this.stopDurationTimer()
+    this.durationTimer = setInterval(() => {
+      if (this.state.startedAt) {
+        this.emit({
+          durationSeconds: Math.floor((Date.now() - this.state.startedAt) / 1000),
+        })
+      }
+    }, 1000)
+  }
+
+  private stopDurationTimer() {
+    if (this.durationTimer) {
+      clearInterval(this.durationTimer)
+      this.durationTimer = null
+    }
+  }
+
+  private handleNotification(notification: INotification) {
+    const call = notification.call
+    if (!call) return
+
+    this.activeCall = call
+
+    const direction = call.direction === 'inbound' ? 'incoming' : 'outgoing'
+    const phase = callStateMap[call.state]
+
+    if (phase) {
+      if (phase === 'active' && this.state.phase !== 'active') {
+        this.startDurationTimer()
+        this.emit({ phase, direction, startedAt: Date.now() })
+      } else if (phase === 'ended') {
+        this.stopDurationTimer()
+        this.emit({ phase, direction })
+        this.activeCall = null
+      } else {
+        this.emit({ phase, direction })
+      }
+    }
+
+    if (call.state === 'held') {
+      this.emit({ held: true })
+    }
+
+    this.emit({ muted: call.isAudioMuted ?? false })
+  }
+
+  async connect() {
+    if (this.rtc?.connected) return
+
+    this.emit({ phase: 'requesting-token' })
+    const loginToken = await this.getToken()
+
+    this.emit({ phase: 'connecting' })
+    this.ensureAudioElements()
+
+    this.rtc = new TelnyxRTC({ login_token: loginToken })
+    this.rtc.localElement = this.localElement!
+    this.rtc.remoteElement = this.remoteElement!
+
+    this.rtc
+      .on('telnyx.ready', () => this.emit({ phase: 'ready' }))
+      .on('telnyx.error', (event) => this.emit({ phase: 'failed', error: event?.error?.message || 'Telnyx error' }))
+      .on('telnyx.notification', (notification) => this.handleNotification(notification))
+
+    await this.rtc.connect()
+  }
+
+  disconnect() {
+    this.stopDurationTimer()
+    this.activeCall = null
+    this.rtc?.disconnect()
+    this.rtc = null
+    this.removeAudioElements()
+    this.emit({
+      phase: 'idle',
+      direction: 'outgoing',
+      durationSeconds: 0,
+      startedAt: undefined,
+      target: undefined,
+      error: undefined,
+      muted: false,
+      held: false,
+    })
+  }
+
+  async call(target: CallTarget) {
+    if (!this.rtc) throw new Error('Client not connected')
+    this.emit({ phase: 'connecting', direction: 'outgoing', target })
+    this.activeCall = this.rtc.newCall({
+      destinationNumber: target.phone,
+      callerName: target.name,
+      remoteElement: this.remoteElement!,
+      localElement: this.localElement!,
+    })
+  }
+
+  async answer() {
+    if (!this.activeCall) throw new Error('No incoming call')
+    await this.activeCall.answer({
+      remoteElement: this.remoteElement!,
+      localElement: this.localElement!,
+    })
+  }
+
+  async hangup() {
+    await this.activeCall?.hangup()
+  }
+
+  toggleMute() {
+    if (!this.activeCall) return
+    this.activeCall.toggleAudioMute()
+    this.emit({ muted: this.activeCall.isAudioMuted })
+  }
+
+  toggleHold() {
+    if (!this.activeCall) return
+    void this.activeCall.toggleHold()
+    this.emit({ held: !this.state.held })
+  }
+}
