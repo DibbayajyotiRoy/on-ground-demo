@@ -128,7 +128,13 @@ function requirePasscode(req, res) {
 
 app.post('/api/twilio/token', (req, res) => {
   if (!requirePasscode(req, res)) return
-  const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: authToken, TWILIO_TWIML_APP_SID: appSid } = process.env
+  const {
+    TWILIO_ACCOUNT_SID: sid,
+    TWILIO_AUTH_TOKEN: authToken,
+    TWILIO_TWIML_APP_SID: appSid,
+    TWILIO_API_KEY_SID: keySid,
+    TWILIO_API_KEY_SECRET: keySecret,
+  } = process.env
   if (!sid || !authToken || !appSid) {
     return res.status(503).json({ error: 'Twilio not configured' })
   }
@@ -136,7 +142,12 @@ app.post('/api/twilio/token', (req, res) => {
     // Lazy import keeps the base app fast when Twilio is unused.
     return import('twilio').then(({ default: twilio }) => {
       const AccessToken = twilio.jwt.AccessToken
-      const token = new AccessToken(sid, sid, authToken, { identity: 'on-ground-agent', ttl: 3600 })
+      // Voice SDK tokens must be signed with an API key pair when available;
+      // the account auth-token path is rejected by the gateway (20101).
+      const token = new AccessToken(sid, keySid || sid, keySecret || authToken, {
+        identity: 'on-ground-agent',
+        ttl: 3600,
+      })
       const grant = new AccessToken.VoiceGrant({
         outgoingApplicationSid: appSid,
         incomingAllow: true,
