@@ -10,6 +10,7 @@ export interface PlanScreenProps {
   call: CallInfo
   onStartCall: (target: CallTarget) => void
   onOpenLeads: (leadId?: string) => void
+  onTestCall?: () => void
 }
 
 export interface CalendarScreenProps {

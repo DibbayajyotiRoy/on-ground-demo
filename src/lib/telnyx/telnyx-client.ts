@@ -23,6 +23,9 @@ export class TelnyxTelephonyClient implements TelephonyClient {
   private rtc: TelnyxRTC | null = null
   private rtcReady = false
   private readyWaiters: { resolve: () => void; reject: (err: Error) => void }[] = []
+  private callConnected = false
+  private expectLoopback = false
+  private secondCall: INotification['call'] | null = null
   private activeCall: INotification['call'] | null = null
   private state: CallInfo
   private durationTimer: ReturnType<typeof setInterval> | null = null
@@ -99,28 +102,69 @@ export class TelnyxTelephonyClient implements TelephonyClient {
     const call = notification.call
     if (!call) return
 
-    this.activeCall = call
-
     const direction = call.direction === 'inbound' ? 'incoming' : 'outgoing'
     const phase = callStateMap[call.state]
 
-    if (phase) {
-      if (phase === 'active' && this.state.phase !== 'active') {
+    // Loopback demo: when we dialed our own Telnyx number, the inbound leg
+    // arrives as a second call — answer it automatically.
+    if (
+      this.expectLoopback &&
+      direction === 'incoming' &&
+      (call.state === 'ringing' || call.state === 'early')
+    ) {
+      this.secondCall = call
+      void call.answer({
+        remoteElement: this.remoteElement!,
+        localElement: this.localElement!,
+      })
+      return
+    }
+
+    if (phase === 'active') {
+      this.callConnected = true
+      if (this.state.phase !== 'active') {
+        this.activeCall = call
         this.startDurationTimer()
         this.emit({ phase, direction, startedAt: Date.now() })
-      } else if (phase === 'ended') {
-        this.stopDurationTimer()
-        this.emit({ phase, direction })
-        this.activeCall = null
+      }
+      return this.emit({ muted: call.isAudioMuted ?? false })
+    }
+
+    if (phase === 'ended') {
+      if (this.secondCall && call.id === this.secondCall.id) {
+        this.secondCall = null
+        void this.activeCall?.hangup()
+        return
+      }
+      const c = call as unknown as {
+        cause?: string
+        sipReason?: string
+        sipCode?: number
+      }
+      const reason = c.sipReason || c.cause
+      const wasConnected = this.callConnected
+      this.stopDurationTimer()
+      this.callConnected = false
+      this.expectLoopback = false
+      this.activeCall = null
+      // A call that never connected isn't an ordinary "ended" — surface why.
+      if (!wasConnected && direction === 'outgoing') {
+        this.emit({
+          phase: 'failed',
+          direction,
+          error: reason
+            ? `${reason} (Telnyx)`
+            : 'Call rejected by the network — check the destination is enabled on your Telnyx outbound profile',
+        })
       } else {
         this.emit({ phase, direction })
       }
+      return
     }
 
-    if (call.state === 'held') {
-      this.emit({ held: true })
-    }
-
+    this.activeCall = call
+    if (phase) this.emit({ phase, direction })
+    if (call.state === 'held') this.emit({ held: true })
     this.emit({ muted: call.isAudioMuted ?? false })
   }
 
@@ -178,6 +222,9 @@ export class TelnyxTelephonyClient implements TelephonyClient {
   disconnect() {
     this.stopDurationTimer()
     this.activeCall = null
+    this.secondCall = null
+    this.callConnected = false
+    this.expectLoopback = false
     this.rtc?.disconnect()
     this.rtc = null
     this.removeAudioElements()
@@ -195,6 +242,8 @@ export class TelnyxTelephonyClient implements TelephonyClient {
 
   async call(target: CallTarget) {
     if (!this.rtc) throw new Error('Client not connected')
+    this.callConnected = false
+    this.expectLoopback = target.phone === import.meta.env.VITE_TELNYX_PHONE_NUMBER
     this.emit({ phase: 'connecting', direction: 'outgoing', target })
     this.activeCall = this.rtc.newCall({
       destinationNumber: target.phone,
@@ -214,6 +263,10 @@ export class TelnyxTelephonyClient implements TelephonyClient {
 
   async hangup() {
     await this.activeCall?.hangup()
+    if (this.secondCall) {
+      await this.secondCall.hangup()
+      this.secondCall = null
+    }
   }
 
   toggleMute() {

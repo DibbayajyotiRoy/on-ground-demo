@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import {
+  FlaskConical,
   Phone,
   PhoneIncoming,
   PhoneMissed,
@@ -112,7 +113,7 @@ function sopChecklist(score?: number) {
   }
 }
 
-export function PlanScreen({ call, onStartCall, onOpenLeads }: PlanScreenProps) {
+export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanScreenProps) {
   const [activeTab, setActiveTab] = useState('calls')
   const [page, setPage] = useState(0)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -186,6 +187,17 @@ export function PlanScreen({ call, onStartCall, onOpenLeads }: PlanScreenProps) 
           <p className="text-xs text-white/70">Planner · {todayLabel}</p>
         </div>
         <div className="flex items-center gap-2">
+          {onTestCall && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="bg-white/10 text-white hover:bg-white/20"
+              onClick={onTestCall}
+            >
+              <FlaskConical className="size-4" />
+              Test call
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"

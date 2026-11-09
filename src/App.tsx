@@ -120,6 +120,12 @@ export default function App() {
     void initiateCall(target)
   }, [initiateCall])
 
+  const startTestCall = useCallback(() => {
+    const ownNumber = import.meta.env.VITE_TELNYX_PHONE_NUMBER as string | undefined
+    if (!ownNumber) return
+    startCall({ name: 'Loopback test (Telnyx US)', phone: ownNumber })
+  }, [startCall])
+
   const submitPasscode = useCallback(() => {
     const value = passcodeInput.trim()
     if (!value) {
@@ -202,7 +208,7 @@ export default function App() {
             <DashboardScreen onOpenLeads={openLeads} onStartCall={startCall} />
           )}
           {view === 'plan' && (
-            <PlanScreen call={call} onStartCall={startCall} onOpenLeads={openLeads} />
+            <PlanScreen call={call} onStartCall={startCall} onOpenLeads={openLeads} onTestCall={startTestCall} />
           )}
           {view === 'calendar' && <CalendarScreen onStartCall={startCall} />}
           {view === 'pulse' && <PulseScreen onStartCall={startCall} />}
