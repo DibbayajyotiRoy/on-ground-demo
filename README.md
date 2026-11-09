@@ -24,7 +24,7 @@ Telnyx WebRTC.
 | Honest failure states | ✅ | Failed calls show the gateway's real reason (D13/D60 codes) |
 | Public deployment | ✅ | Vercel URL above |
 | Original code, git history, README | ✅ | This repo |
-| Screen recording of the call flow | ✅ | Submission email — video shows live dial → gateway responses (D13/D60) → failure reasons; connected call pending account upgrade (below) |
+| Screen recording of the call flow | ✅ | Submission email — real connected call: browser dials +91 via Telnyx → auto-fallback to Twilio (verified-number trial path) → 30s active call with live timer |
 
 ## What's real vs. mocked
 
