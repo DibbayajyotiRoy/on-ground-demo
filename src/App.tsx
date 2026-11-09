@@ -134,12 +134,16 @@ export default function App() {
     }
   }, [])
 
-  // Telnyx connected but rejected the destination (trial geo/verified limits) —
-  // retry once through Twilio, which dials verified numbers on trial.
+  // Telnyx rejected the destination outright (trial geo/verified limits) — or
+  // connected and dropped the call in under 15s (carrier-side filter pickup)
+  // — retry once through Twilio, which terminates via a different gateway.
   useEffect(() => {
-    if (call.phase !== 'failed' || !call.target || !call.error) return
-    if (!/whitelisted|non-verified|not found|D\d{2}|busy|unreachable|invalid/i.test(call.error)) return
-    if (twilioTriedRef.current?.phone === call.target.phone) return
+    if (!call.target || twilioTriedRef.current?.phone === call.target.phone) return
+    const droppedEarly =
+      call.phase === 'ended' && call.durationSeconds > 0 && call.durationSeconds < 15
+    const rejected = call.phase === 'failed' && !!call.error
+    if (!droppedEarly && !rejected) return
+    if (rejected && !/whitelisted|non-verified|not found|D\d{2}|busy|unreachable|invalid/i.test(call.error!)) return
     twilioTriedRef.current = call.target
     setCall((c) => ({ ...c, error: undefined, phase: 'connecting' }))
     void initiateCall(call.target, 'twilio')
