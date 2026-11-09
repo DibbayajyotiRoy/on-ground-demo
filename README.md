@@ -7,6 +7,25 @@ Telnyx WebRTC.
 
 **Live demo:** https://on-ground-demo.vercel.app (passcode: ask the demo operator)
 
+## Assignment requirements → where they live
+
+| OnGround requirement | Status | Where |
+| --- | --- | --- |
+| Daily brief + dashboard (KPIs, progress, earnings, tasks, charts) | ✅ | `src/features/dashboard/` |
+| Calling plan: ranked calls-to-make, missed-call priorities, pagination | ✅ | `src/features/plan/PlanScreen.tsx` |
+| Incoming calls view + answer flow | ✅ | Banner `Answer` button, `TelnyxTelephonyClient.answer()` |
+| Recent calls with outcomes + SOP scores, wrap-up flow | ✅ | Plan → Recent tab |
+| Practise/test a call | ✅ | Plan → **Test call** (real PSTN loopback through Telnyx US number) |
+| Keypad dialing | ✅ | Plan → Keypad sheet |
+| Leads dialog (scores, journey, buying signals) | ✅ | `src/features/leads/LeadsDialog.tsx` |
+| Calendar with events | ✅ | `src/features/calendar/CalendarScreen.tsx` |
+| Pulse chat (channels, kudos, bot) | ✅ | `src/features/pulse/PulseScreen.tsx` |
+| **Real browser → phone calling** | ✅ (trial-limited) | `src/lib/telnyx/` — Telnyx WebRTC, mute/hold/timer/hangup; trial tier allows US/CA/verified numbers only (documented below) |
+| Honest failure states | ✅ | Failed calls show the gateway's real reason (D13/D60 codes) |
+| Public deployment | ✅ | Vercel URL above |
+| Original code, git history, README | ✅ | This repo |
+| Screen recording of the call | ✅ | See submission email |
+
 ## What's real vs. mocked
 
 - **Real:** browser ↔ PSTN calls (dial, ring, two-way audio, mute, hold, timer) via
