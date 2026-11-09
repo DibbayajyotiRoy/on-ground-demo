@@ -74,10 +74,37 @@ app.post('/api/telephony/token', async (req, res) => {
       return res.status(502).json({ error: 'Upstream error' })
     }
 
-    res.json({ loginToken })
+    res.json({ token: loginToken })
   } catch {
     res.status(502).json({ error: 'Upstream error' })
   }
+})
+
+// Trial-tier Telnyx accounts cannot mint telephony-credential tokens (feature
+// 10038), so the browser can instead log in directly with the SIP credential
+// user/pass stored server-side. Tokens remain the preferred path when available.
+app.post('/api/telephony/sip-credentials', (req, res) => {
+  const parsed = tokenBodySchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid body' })
+  }
+
+  if (!process.env.DEMO_PASSCODE) {
+    return res.status(503).json({ error: 'Service unavailable' })
+  }
+
+  if (parsed.data.passcode !== process.env.DEMO_PASSCODE) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+
+  const username = process.env.TELNYX_SIP_USERNAME
+  const password = process.env.TELNYX_SIP_PASSWORD
+
+  if (!username || !password) {
+    return res.status(503).json({ error: 'Service unavailable' })
+  }
+
+  res.json({ username, password })
 })
 
 app.get('/api/health', (_req, res) => {

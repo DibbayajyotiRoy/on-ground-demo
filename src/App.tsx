@@ -23,22 +23,41 @@ const NAV_ITEMS: { view: AppView; label: string; icon: typeof LayoutDashboard }[
 
 const PASSCODE_KEY = 'demo_passcode'
 
-const provider = createTelnyxProvider(async () => {
-  const passcode = sessionStorage.getItem(PASSCODE_KEY)
-  if (!passcode) throw new Error('Demo passcode required')
-  const res = await fetch('/api/telephony/token', {
+async function postJson(path: string, passcode: string): Promise<Response> {
+  return fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ passcode }),
   })
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null
-    if (res.status === 401) sessionStorage.removeItem(PASSCODE_KEY)
-    throw new Error(body?.error ?? `Token request failed (${res.status})`)
+}
+
+// Trial-tier Telnyx accounts cannot mint telephony-credential tokens (error
+// 10038), so try SIP user/pass login first and fall back to a login token
+// when the account supports it.
+const provider = createTelnyxProvider(async () => {
+  const passcode = sessionStorage.getItem(PASSCODE_KEY)
+  if (!passcode) throw new Error('Demo passcode required')
+
+  const sipRes = await postJson('/api/telephony/sip-credentials', passcode)
+  if (sipRes.ok) {
+    const data = (await sipRes.json()) as { username?: string; password?: string }
+    if (data.username && data.password) {
+      return { login: data.username, password: data.password }
+    }
+  } else if (sipRes.status === 401) {
+    sessionStorage.removeItem(PASSCODE_KEY)
+    throw new Error('Unauthorized')
   }
-  const data = (await res.json()) as { token?: string }
+
+  const tokenRes = await postJson('/api/telephony/token', passcode)
+  if (!tokenRes.ok) {
+    const body = (await tokenRes.json().catch(() => null)) as { error?: string } | null
+    if (tokenRes.status === 401) sessionStorage.removeItem(PASSCODE_KEY)
+    throw new Error(body?.error ?? `Token request failed (${tokenRes.status})`)
+  }
+  const data = (await tokenRes.json()) as { token?: string }
   if (!data.token) throw new Error('No token in response')
-  return data.token
+  return { loginToken: data.token }
 })
 
 export default function App() {

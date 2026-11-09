@@ -1,5 +1,6 @@
 import { TelnyxRTC } from '@telnyx/webrtc'
 import type { INotification } from '@telnyx/webrtc'
+import type { TelnyxAuth } from './telnyx-provider'
 import type { CallInfo, TelephonyClient } from '../call-types'
 import type { CallTarget } from '../types'
 
@@ -26,14 +27,14 @@ export class TelnyxTelephonyClient implements TelephonyClient {
   private localElement: HTMLMediaElement | null = null
   private remoteElement: HTMLMediaElement | null = null
 
-  private getToken: () => Promise<string>
+  private getAuth: () => Promise<TelnyxAuth>
   private onState: (state: CallInfo) => void
 
   constructor(
-    getToken: () => Promise<string>,
+    getAuth: () => Promise<TelnyxAuth>,
     onState: (state: CallInfo) => void,
   ) {
-    this.getToken = getToken
+    this.getAuth = getAuth
     this.onState = onState
     this.state = {
       phase: 'idle',
@@ -125,12 +126,15 @@ export class TelnyxTelephonyClient implements TelephonyClient {
     if (this.rtc?.connected) return
 
     this.emit({ phase: 'requesting-token' })
-    const loginToken = await this.getToken()
+    const auth = await this.getAuth()
 
     this.emit({ phase: 'connecting' })
     this.ensureAudioElements()
 
-    this.rtc = new TelnyxRTC({ login_token: loginToken })
+    const options = 'loginToken' in auth
+      ? { login_token: auth.loginToken }
+      : { login: auth.login, password: auth.password }
+    this.rtc = new TelnyxRTC(options)
     this.rtc.localElement = this.localElement!
     this.rtc.remoteElement = this.remoteElement!
 
