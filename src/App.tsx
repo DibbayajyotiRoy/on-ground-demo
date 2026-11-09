@@ -92,6 +92,9 @@ export default function App() {
         clientRef.current = provider.createClient(setCall)
       }
       const client = clientRef.current
+      if (import.meta.env.DEV) {
+        ;(window as unknown as Record<string, unknown>).__telephony = client
+      }
       if (callRef.current.phase === 'idle' || callRef.current.phase === 'failed' || callRef.current.phase === 'ended' || callRef.current.phase === 'ready') {
         await client.connect()
       }

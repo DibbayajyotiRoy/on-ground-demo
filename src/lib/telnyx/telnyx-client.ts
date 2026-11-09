@@ -280,4 +280,9 @@ export class TelnyxTelephonyClient implements TelephonyClient {
     void this.activeCall.toggleHold()
     this.emit({ held: !this.state.held })
   }
+
+  sendDtmf(digits: string) {
+    this.activeCall?.dtmf(digits)
+    this.secondCall?.dtmf(digits)
+  }
 }

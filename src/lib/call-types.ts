@@ -30,6 +30,7 @@ export interface TelephonyClient {
   hangup(): Promise<void>
   toggleMute(): void
   toggleHold(): void
+  sendDtmf(digits: string): void
 }
 
 export interface TelephonyProvider {
