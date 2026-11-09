@@ -121,6 +121,18 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
   const [dialed, setDialed] = useState('')
   const [keypadOpen, setKeypadOpen] = useState(false)
 
+  // Simulated live transcript (matches the mock's transcript panel; practice
+  // content, revealed line-by-line while the call is active).
+  const TRANSCRIPT_LINES = [
+    { at: 2, speaker: 'Agent (You)', text: 'Hi, this is Arvind from The Sleep Company — am I speaking with the right person?' },
+    { at: 6, speaker: 'Customer', text: 'Yes, speaking. I had asked about the Ortho GRID mattress last week.' },
+    { at: 12, speaker: 'Agent (You)', text: 'Right! Your quote is still valid — the no-cost EMI works out to ₹2,150 a month.' },
+    { at: 18, speaker: 'Customer', text: 'That fits my budget. What about delivery to Whitefield?' },
+    { at: 25, speaker: 'Agent (You)', text: 'Delivery within 4 days, free installation included. Shall I book it?' },
+    { at: 32, speaker: 'Customer', text: 'Yes, go ahead. Send me the confirmation on WhatsApp.' },
+  ]
+  const visibleTranscript = TRANSCRIPT_LINES.filter((l) => l.at <= call.durationSeconds)
+
   const todayLabel = format(today, 'EEEE, d MMMM yyyy')
 
   const callsToMake = useMemo(
@@ -303,6 +315,23 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
               )}
             </div>
           </CardContent>
+          {call.phase === 'active' && (
+            <div className="border-t border-black/5 px-4 py-3">
+              <div className="flex items-center gap-2 pb-2">
+                <span className="size-1.5 animate-pulse rounded-full bg-green-500" />
+                <p className="text-xs font-semibold tracking-wide text-[#1d9e75] uppercase">Live transcript</p>
+                <Badge variant="secondary" className="text-[10px]">practice content</Badge>
+              </div>
+              <div className="flex max-h-44 flex-col gap-2 overflow-y-auto">
+                {visibleTranscript.map((line, i) => (
+                  <div key={i} className="rounded-lg bg-[#f7f7f7] px-3 py-2">
+                    <p className="text-[11px] font-semibold text-[#1d9e75]">{line.speaker}</p>
+                    <p className="text-sm text-gray-800">{line.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
       )}
       {call.phase === 'idle' && (
