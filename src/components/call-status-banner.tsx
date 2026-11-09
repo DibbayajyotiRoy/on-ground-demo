@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Mic, MicOff, Pause, PhoneOff } from 'lucide-react'
+import { Mic, MicOff, Pause, Phone, PhoneOff } from 'lucide-react'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import type { CallInfo, CallPhase } from '@/lib/call-types'
@@ -7,6 +7,7 @@ import type { CallInfo, CallPhase } from '@/lib/call-types'
 export interface CallStatusBannerProps {
   call: CallInfo
   onEnd: () => void
+  onAnswer?: () => void
   onToggleMute: () => void
   onToggleHold: () => void
 }
@@ -32,6 +33,7 @@ function formatDuration(totalSeconds: number) {
 export function CallStatusBanner({
   call,
   onEnd,
+  onAnswer,
   onToggleMute,
   onToggleHold,
 }: CallStatusBannerProps) {
@@ -105,6 +107,16 @@ export function CallStatusBanner({
                 <Pause className="size-4" />
               </Button>
             </>
+          )}
+          {call.phase === 'incoming' && onAnswer && (
+            <Button
+              size="sm"
+              onClick={onAnswer}
+              className="gap-1 rounded-lg bg-white text-[#0f6e56] hover:bg-white/90"
+            >
+              <Phone className="size-4" />
+              Answer
+            </Button>
           )}
           <Button
             size="sm"

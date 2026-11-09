@@ -135,6 +135,10 @@ export default function App() {
     }
   }, [passcodeInput, pendingTarget, initiateCall])
 
+  const answerCall = useCallback(() => {
+    void clientRef.current?.answer()
+  }, [])
+
   const endCall = useCallback(() => {
     void clientRef.current?.hangup()
   }, [])
@@ -189,6 +193,7 @@ export default function App() {
         <CallStatusBanner
           call={call}
           onEnd={endCall}
+          onAnswer={answerCall}
           onToggleMute={toggleMute}
           onToggleHold={toggleHold}
         />
