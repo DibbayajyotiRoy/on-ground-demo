@@ -212,7 +212,8 @@ app.post('/api/twilio/agent', async (req, res) => {
     }))
     return res.status(403).type('text/plain').send('Forbidden')
   }
-  res.type('text/xml').send(await nextTwiml(req.body.CallSid, req.body.SpeechResult, req.originalUrl))
+  // Must be absolute: the trial account's TwiML proxy does not resolve a relative Gather action.
+  res.type('text/xml').send(await nextTwiml(req.body.CallSid, req.body.SpeechResult, publicUrl(req) + req.originalUrl))
 })
 
 app.post('/api/twilio/call-status', async (req, res) => {

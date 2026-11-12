@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 process.env.DEMO_PASSCODE = 'test-pass'
 process.env.TWILIO_ACCOUNT_SID = 'ACtest'
@@ -93,4 +94,10 @@ test('call-status rejects an invalid call id', async () => {
 
 test('escapeXml escapes markup characters', () => {
   assert.equal(escapeXml('a<b & "c"'), 'a&lt;b &amp; &quot;c&quot;')
+})
+
+test('agent webhook Gather action is absolute (trial proxy does not resolve relative URLs)', () => {
+  const source = readFileSync(new URL('./app.mjs', import.meta.url), 'utf8')
+  assert.ok(source.includes('publicUrl(req) + req.originalUrl'))
+  assert.ok(!source.includes('nextTwiml(req.body.CallSid, req.body.SpeechResult, req.originalUrl)'))
 })
