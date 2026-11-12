@@ -9,6 +9,9 @@ import { getCall, nextTwiml } from './phone-agent.mjs'
 dotenv.config()
 
 const app = express()
+// Behind Vercel's proxy the client address is in X-Forwarded-For; without this
+// every caller shares one rate-limit bucket.
+app.set('trust proxy', 1)
 
 app.use(helmet())
 app.use(cors({
@@ -207,7 +210,17 @@ async function handleAgentWebhook(req, res) {
     publicUrl(req) + req.originalUrl,
     req.body,
   )
-  if (!valid) return res.status(403).type('text/plain').send('Forbidden')
+  if (!valid) {
+    // Names only, never values: enough to diagnose a signature mismatch.
+    console.warn('twilio signature rejected', JSON.stringify({
+      url: publicUrl(req) + req.originalUrl,
+      hasSignature: !!req.get('x-twilio-signature'),
+      contentType: req.get('content-type'),
+      params: Object.keys(req.body ?? {}),
+      twilioHeaders: Object.keys(req.headers).filter((h) => /twilio/i.test(h)),
+    }))
+    return res.status(403).type('text/plain').send('Forbidden')
+  }
   res.type('text/xml').send(await nextTwiml(req.body.CallSid, req.body.SpeechResult))
 }
 
