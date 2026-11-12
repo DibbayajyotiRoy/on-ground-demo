@@ -328,6 +328,27 @@ export function PlanScreen({
         </div>
       </header>
 
+      <Card className="bg-[#faf8f5]">
+        <CardContent className="flex flex-col gap-3 py-4">
+          <div>
+            <p className="font-medium">Recorded demo call</p>
+            <p className="text-xs text-muted-foreground">
+              A real phone call: the AI agent phones a verified Indian mobile over Twilio and speaks Hindi. Recorded at the handset on speaker, because Twilio&apos;s trial cannot record.
+            </p>
+          </div>
+          <audio controls preload="none" src="/demo-ai-call.m4a" className="w-full" />
+          <div className="flex justify-end">
+            <a
+              href="/demo-ai-call.m4a"
+              download
+              className="text-xs font-medium text-[#0f6e56] underline"
+            >
+              Download (1 min 54 s)
+            </a>
+          </div>
+        </CardContent>
+      </Card>
+
       {call.phase !== 'idle' && (
         <Card className="border-l-4 border-l-green-600 bg-[#faf8f5]">
           <CardContent className="flex flex-col gap-2 py-4 sm:flex-row sm:items-center sm:justify-between">
