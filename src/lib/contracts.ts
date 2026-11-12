@@ -11,6 +11,9 @@ export interface PlanScreenProps {
   onStartCall: (target: CallTarget) => void
   onOpenLeads: (leadId?: string) => void
   onTestCall?: () => void
+  aiMode: boolean
+  onToggleAi: () => void
+  onPracticeAi?: () => void
 }
 
 export interface CalendarScreenProps {

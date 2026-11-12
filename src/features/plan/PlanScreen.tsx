@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import {
+  Bot,
   FlaskConical,
   Phone,
   PhoneIncoming,
@@ -39,6 +40,7 @@ import { Separator } from '@/components/ui/separator'
 import { leads, recentCalls } from '@/lib/mock-data'
 import type { RecentCall, CallDirection } from '@/lib/types'
 import type { PlanScreenProps } from '@/lib/contracts'
+import { cn } from '@/lib/utils'
 
 const ROWS_PER_PAGE = 2
 const today = new Date()
@@ -113,25 +115,28 @@ function sopChecklist(score?: number) {
   }
 }
 
-export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanScreenProps) {
+export function PlanScreen({
+  call,
+  onStartCall,
+  onOpenLeads,
+  onTestCall,
+  aiMode,
+  onToggleAi,
+  onPracticeAi,
+}: PlanScreenProps) {
   const [activeTab, setActiveTab] = useState('calls')
   const [page, setPage] = useState(0)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [reviewCall, setReviewCall] = useState<RecentCall | null>(null)
   const [dialed, setDialed] = useState('')
   const [keypadOpen, setKeypadOpen] = useState(false)
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const transcriptCount = call.transcript?.length ?? 0
 
-  // Simulated live transcript (matches the mock's transcript panel; practice
-  // content, revealed line-by-line while the call is active).
-  const TRANSCRIPT_LINES = [
-    { at: 2, speaker: 'Agent (You)', text: 'Hi, this is Arvind from The Sleep Company — am I speaking with the right person?' },
-    { at: 6, speaker: 'Customer', text: 'Yes, speaking. I had asked about the Ortho GRID mattress last week.' },
-    { at: 12, speaker: 'Agent (You)', text: 'Right! Your quote is still valid — the no-cost EMI works out to ₹2,150 a month.' },
-    { at: 18, speaker: 'Customer', text: 'That fits my budget. What about delivery to Whitefield?' },
-    { at: 25, speaker: 'Agent (You)', text: 'Delivery within 4 days, free installation included. Shall I book it?' },
-    { at: 32, speaker: 'Customer', text: 'Yes, go ahead. Send me the confirmation on WhatsApp.' },
-  ]
-  const visibleTranscript = TRANSCRIPT_LINES.filter((l) => l.at <= call.durationSeconds)
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [transcriptCount])
 
   const todayLabel = format(today, 'EEEE, d MMMM yyyy')
 
@@ -162,6 +167,13 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
     () => leads.find((l) => normalizePhone(l.phone) === normalizePhone(dialed)),
     [dialed]
   )
+  // Any number can be dialled: 10 digits is an Indian mobile, 11-15 digits already carry a country code.
+  const dialDigits = normalizePhone(dialed)
+  const keypadTarget = matchedLeadForKeypad
+    ? { name: matchedLeadForKeypad.name, phone: matchedLeadForKeypad.phone, leadId: matchedLeadForKeypad.id }
+    : dialDigits.length >= 10 && dialDigits.length <= 15
+      ? { name: 'Keypad call', phone: dialDigits.length === 10 ? `+91${dialDigits}` : `+${dialDigits}` }
+      : null
 
   function toggleExpand(id: string) {
     setExpandedId((current) => (current === id ? null : id))
@@ -173,8 +185,8 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
   }
 
   function handleKeypadCall() {
-    if (matchedLeadForKeypad) {
-      handleStartCall({ name: matchedLeadForKeypad.name, phone: matchedLeadForKeypad.phone, leadId: matchedLeadForKeypad.id })
+    if (keypadTarget) {
+      handleStartCall(keypadTarget)
       setDialed('')
     }
   }
@@ -199,6 +211,29 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
           <p className="text-xs text-white/70">Planner · {todayLabel}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-pressed={aiMode}
+            className={cn(
+              'text-white',
+              aiMode ? 'bg-[#2fbf94] hover:bg-[#27a882]' : 'bg-white/10 hover:bg-white/20',
+            )}
+            onClick={onToggleAi}
+          >
+            <Bot className="size-4" />
+            AI agent: {aiMode ? 'On' : 'Off'}
+          </Button>
+          {onPracticeAi && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="bg-white/10 text-white hover:bg-white/20"
+              onClick={onPracticeAi}
+            >
+              Practice with AI
+            </Button>
+          )}
           {onTestCall && (
             <Button
               variant="secondary"
@@ -229,7 +264,7 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
               <SheetHeader>
                 <SheetTitle>Dialpad</SheetTitle>
                 <SheetDescription>
-                  Calls are restricted to verified lead numbers in your data.
+                  On the Twilio trial, only verified numbers will ring.
                 </SheetDescription>
               </SheetHeader>
               <div className="mx-auto w-full max-w-sm">
@@ -240,9 +275,13 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
                   <p className="mb-3 text-center text-sm text-green-700">
                     Matched: {matchedLeadForKeypad.name}
                   </p>
+                ) : keypadTarget ? (
+                  <p className="mb-3 text-center text-sm text-muted-foreground">
+                    Ready to call {keypadTarget.phone}
+                  </p>
                 ) : dialed ? (
                   <p className="mb-3 text-center text-sm text-muted-foreground">
-                    No verified lead matches this number.
+                    Enter 10 to 15 digits to call.
                   </p>
                 ) : (
                   <p className="mb-3 text-center text-sm text-muted-foreground">
@@ -271,7 +310,7 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
                     type="button"
                     size="lg"
                     className="h-12 bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                    disabled={!matchedLeadForKeypad}
+                    disabled={!keypadTarget}
                     onClick={handleKeypadCall}
                   >
                     <Phone className="size-5" />
@@ -297,10 +336,22 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
                 <Phone className="size-5" />
               </div>
               <div>
-                <p className="font-medium">{phaseLabel(call.phase)}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium">{phaseLabel(call.phase)}</p>
+                  {call.mode === 'ai' && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      AI agent
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   {call.target ? `${call.target.name} · ${call.target.phone}` : 'No target set'}
                 </p>
+                {call.mode === 'ai' && call.target?.phone && (
+                  <p className="text-xs text-muted-foreground">
+                    The AI agent is speaking on the phone line. Twilio&apos;s trial cannot record audio, so this call keeps a transcript only.
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-4">
@@ -315,20 +366,38 @@ export function PlanScreen({ call, onStartCall, onOpenLeads, onTestCall }: PlanS
               )}
             </div>
           </CardContent>
-          {call.phase === 'active' && (
+          {call.transcript && call.transcript.length > 0 && (
             <div className="border-t border-black/5 px-4 py-3">
               <div className="flex items-center gap-2 pb-2">
-                <span className="size-1.5 animate-pulse rounded-full bg-green-500" />
-                <p className="text-xs font-semibold tracking-wide text-[#1d9e75] uppercase">Live transcript</p>
-                <Badge variant="secondary" className="text-[10px]">practice content</Badge>
+                {call.phase === 'active' && <span className="size-1.5 animate-pulse rounded-full bg-green-500" />}
+                <p className="text-xs font-semibold tracking-wide text-[#1d9e75] uppercase">
+                  {call.phase === 'active' ? 'Live transcript' : 'Transcript'}
+                </p>
               </div>
-              <div className="flex max-h-44 flex-col gap-2 overflow-y-auto">
-                {visibleTranscript.map((line, i) => (
+              <div ref={transcriptRef} className="flex max-h-44 flex-col gap-2 overflow-y-auto">
+                {call.transcript.map((line, i) => (
                   <div key={i} className="rounded-lg bg-[#f7f7f7] px-3 py-2">
-                    <p className="text-[11px] font-semibold text-[#1d9e75]">{line.speaker}</p>
+                    <p className="text-[11px] font-semibold text-[#1d9e75]">
+                      {line.role === 'assistant' ? 'AI agent' : 'Customer'}
+                    </p>
                     <p className="text-sm text-gray-800">{line.text}</p>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+          {call.recordingUrl && (
+            <div className="flex flex-col gap-2 border-t border-black/5 px-4 py-3">
+              <audio controls src={call.recordingUrl} className="w-full" />
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">Stereo: left = agent side, right = phone</p>
+                <a
+                  href={call.recordingUrl}
+                  download="on-ground-call.webm"
+                  className="text-xs font-medium text-[#0f6e56] underline"
+                >
+                  Download recording
+                </a>
               </div>
             </div>
           )}

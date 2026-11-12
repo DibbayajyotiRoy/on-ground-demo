@@ -7,6 +7,7 @@ process.env.TWILIO_AUTH_TOKEN = 'x'
 process.env.TWILIO_PHONE_NUMBER = '+15005550006'
 
 const { default: app } = await import('./app.mjs')
+const { escapeXml } = await import('./phone-agent.mjs')
 
 let server
 let base
@@ -19,26 +20,22 @@ before(async () => {
 
 after(() => new Promise((resolve) => server.close(resolve)))
 
-async function assertConferenceTwiml(res) {
-  assert.equal(res.status, 200)
-  assert.match(res.headers.get('content-type'), /^text\/xml/)
-  const text = await res.text()
-  assert.match(text, /<Conference/)
-  assert.doesNotMatch(text, /5555550100/)
-}
+test('agent webhook rejects an unsigned request', async () => {
+  const res = await fetch(`${base}/api/twilio/agent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'CallSid=CAe1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c',
+  })
+  assert.equal(res.status, 403)
+})
 
-test('voice webhook (form POST) returns conference TwiML and ignores To', async () => {
+test('inbound voice webhook rejects an unsigned request', async () => {
   const res = await fetch(`${base}/api/twilio/voice`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: 'To=%2B15555550100',
   })
-  await assertConferenceTwiml(res)
-})
-
-test('voice webhook (GET query) returns conference TwiML and ignores To', async () => {
-  const res = await fetch(`${base}/api/twilio/voice?To=%2B15555550100`)
-  await assertConferenceTwiml(res)
+  assert.equal(res.status, 403)
 })
 
 test('dial rejects a wrong passcode', async () => {
@@ -66,4 +63,8 @@ test('call-status rejects an invalid call id', async () => {
     body: JSON.stringify({ passcode: 'test-pass', callSid: 'nope' }),
   })
   assert.equal(res.status, 400)
+})
+
+test('escapeXml escapes markup characters', () => {
+  assert.equal(escapeXml('a<b & "c"'), 'a&lt;b &amp; &quot;c&quot;')
 })

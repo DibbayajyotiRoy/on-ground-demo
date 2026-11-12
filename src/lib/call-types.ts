@@ -1,4 +1,7 @@
 import type { CallTarget } from './types'
+import type { TranscriptLine } from '@/lib/agent/voice-agent'
+
+export type { TranscriptLine }
 
 export type CallPhase =
   | 'idle'
@@ -20,12 +23,15 @@ export interface CallInfo {
   muted: boolean
   held: boolean
   error?: string
+  mode?: 'human' | 'ai'
+  transcript?: TranscriptLine[]
+  recordingUrl?: string
 }
 
 export interface TelephonyClient {
   connect(): Promise<void>
   disconnect(): void
-  call(target: CallTarget): Promise<void>
+  call(target: CallTarget, opts?: { ai?: boolean }): Promise<void>
   answer(): Promise<void>
   hangup(): Promise<void>
   toggleMute(): void

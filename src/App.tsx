@@ -13,6 +13,7 @@ import type { AppView, CallTarget } from '@/lib/types'
 import { initialCallState, type CallInfo, type TelephonyClient } from '@/lib/call-types'
 import { createTelnyxProvider } from '@/lib/telnyx/telnyx-provider'
 import { TwilioTelephonyClient } from '@/lib/twilio/twilio-client'
+import { PracticeClient } from '@/lib/agent/practice-client'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS: { view: AppView; label: string; icon: typeof LayoutDashboard }[] = [
@@ -23,6 +24,13 @@ const NAV_ITEMS: { view: AppView; label: string; icon: typeof LayoutDashboard }[
 ]
 
 const PASSCODE_KEY = 'demo_passcode'
+
+// Which client carries a call: Twilio when the AI agent phones the customer, Telnyx
+// for the human browser softphone and the loopback test call, practice for talking
+// to the AI with no phone.
+type Via = 'telnyx' | 'twilio' | 'practice'
+
+const getPasscode = () => sessionStorage.getItem(PASSCODE_KEY)
 
 async function postJson(path: string, passcode: string): Promise<Response> {
   return fetch(path, {
@@ -61,20 +69,6 @@ const provider = createTelnyxProvider(async () => {
   return { loginToken: data.token }
 })
 
-async function getTwilioToken(): Promise<string> {
-  const passcode = sessionStorage.getItem(PASSCODE_KEY)
-  if (!passcode) throw new Error('Demo passcode required')
-  const res = await postJson('/api/twilio/token', passcode)
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null
-    if (res.status === 401) sessionStorage.removeItem(PASSCODE_KEY)
-    throw new Error(body?.error ?? `Twilio token request failed (${res.status})`)
-  }
-  const data = (await res.json()) as { token?: string }
-  if (!data.token) throw new Error('No Twilio token in response')
-  return data.token
-}
-
 export default function App() {
   const [view, setView] = useState<AppView>('dashboard')
   const [call, setCall] = useState<CallInfo>(initialCallState)
@@ -84,17 +78,25 @@ export default function App() {
   const [passcodeInput, setPasscodeInput] = useState('')
   const [passcodeError, setPasscodeError] = useState<string | undefined>(undefined)
   const [pendingTarget, setPendingTarget] = useState<CallTarget | null>(null)
+  const [pendingVia, setPendingVia] = useState<Via>('twilio')
+  const [aiMode, setAiMode] = useState(true)
+  const aiModeRef = useRef(aiMode)
+  useEffect(() => {
+    aiModeRef.current = aiMode
+  }, [aiMode])
 
-  const clientRef = useRef<TelephonyClient | null>(null)
-  const twilioClientRef = useRef<TelephonyClient | null>(null)
-  const twilioTriedRef = useRef<CallTarget | null>(null)
+  const clientsRef = useRef<Partial<Record<Via, TelephonyClient>>>({})
+  const activeClientRef = useRef<TelephonyClient | null>(null)
   const callRef = useRef(call)
   useEffect(() => {
     callRef.current = call
   }, [call])
 
   useEffect(() => {
-    return () => clientRef.current?.disconnect()
+    const clients = clientsRef.current
+    return () => {
+      for (const client of Object.values(clients)) client?.disconnect()
+    }
   }, [])
 
   const openLeads = useCallback((id?: string) => {
@@ -102,29 +104,26 @@ export default function App() {
     setLeadsOpen(true)
   }, [])
 
-  const initiateCall = useCallback(async (target: CallTarget, via: 'telnyx' | 'twilio' = 'telnyx') => {
+  const initiateCall = useCallback(async (target: CallTarget, via: Via = 'twilio') => {
     setView('plan')
     try {
-      const isTwilio = via === 'twilio'
-      let client = isTwilio ? twilioClientRef.current : clientRef.current
+      let client = clientsRef.current[via]
       if (!client) {
-        client = isTwilio
-          ? new TwilioTelephonyClient(getTwilioToken, setCall)
-          : provider.createClient(setCall)
-        if (isTwilio) twilioClientRef.current = client
-        else clientRef.current = client
+        client =
+          via === 'telnyx'
+            ? provider.createClient(setCall)
+            : via === 'twilio'
+              ? new TwilioTelephonyClient(getPasscode, setCall)
+              : new PracticeClient(getPasscode, setCall)
+        clientsRef.current[via] = client
       }
+      activeClientRef.current = client
       if (import.meta.env.DEV) {
         ;(window as unknown as Record<string, unknown>).__telephony = client
       }
       await client.connect()
-      await client.call(target)
+      await client.call(target, { ai: aiModeRef.current })
     } catch (err) {
-      if (via === 'telnyx') {
-        // Telnyx unavailable (e.g. credential issue) — try Twilio once.
-        twilioTriedRef.current = target
-        return initiateCall(target, 'twilio')
-      }
       setCall((c) => ({
         ...c,
         phase: 'failed',
@@ -134,40 +133,31 @@ export default function App() {
     }
   }, [])
 
-  // Telnyx rejected the destination outright (trial geo/verified limits) — or
-  // connected and dropped the call in under 15s (carrier-side filter pickup)
-  // — retry once through Twilio, which terminates via a different gateway.
-  useEffect(() => {
-    if (!call.target || twilioTriedRef.current?.phone === call.target.phone) return
-    const droppedEarly =
-      call.phase === 'ended' && call.durationSeconds > 0 && call.durationSeconds < 15
-    const rejected = call.phase === 'failed' && !!call.error
-    if (!droppedEarly && !rejected) return
-    if (rejected && !/whitelisted|non-verified|not found|D\d{2}|busy|unreachable|invalid/i.test(call.error!)) return
-    twilioTriedRef.current = call.target
-    setCall((c) => ({ ...c, error: undefined, phase: 'connecting' }))
-    void initiateCall(call.target, 'twilio')
-  }, [call, initiateCall])
-
-  const startCall = useCallback((target: CallTarget) => {
+  // Normal calls: the AI agent phones the customer when the AI switch is on, otherwise
+  // a human talks through the browser softphone.
+  const startCall = useCallback((target: CallTarget, via: Via = aiModeRef.current ? 'twilio' : 'telnyx') => {
     if (callRef.current.phase === 'active' || callRef.current.phase === 'ringing' || callRef.current.phase === 'incoming') {
       return
     }
-    twilioTriedRef.current = null
     if (!sessionStorage.getItem(PASSCODE_KEY)) {
       setPendingTarget(target)
+      setPendingVia(via)
       setPasscodeInput('')
       setPasscodeError(undefined)
       setPasscodeOpen(true)
       return
     }
-    void initiateCall(target)
+    void initiateCall(target, via)
   }, [initiateCall])
 
   const startTestCall = useCallback(() => {
     const ownNumber = import.meta.env.VITE_TELNYX_PHONE_NUMBER as string | undefined
     if (!ownNumber) return
-    startCall({ name: 'Loopback test (Telnyx US)', phone: ownNumber })
+    startCall({ name: 'Loopback test (Telnyx US)', phone: ownNumber }, 'telnyx')
+  }, [startCall])
+
+  const startPractice = useCallback(() => {
+    startCall({ name: 'AI practice (no phone)', phone: '' }, 'practice')
   }, [startCall])
 
   const submitPasscode = useCallback(() => {
@@ -181,24 +171,24 @@ export default function App() {
     if (pendingTarget) {
       const target = pendingTarget
       setPendingTarget(null)
-      void initiateCall(target)
+      void initiateCall(target, pendingVia)
     }
-  }, [passcodeInput, pendingTarget, initiateCall])
+  }, [passcodeInput, pendingTarget, pendingVia, initiateCall])
 
   const answerCall = useCallback(() => {
-    void clientRef.current?.answer()
+    void activeClientRef.current?.answer()
   }, [])
 
   const endCall = useCallback(() => {
-    void clientRef.current?.hangup()
+    void activeClientRef.current?.hangup()
   }, [])
 
   const toggleMute = useCallback(() => {
-    clientRef.current?.toggleMute()
+    activeClientRef.current?.toggleMute()
   }, [])
 
   const toggleHold = useCallback(() => {
-    clientRef.current?.toggleHold()
+    activeClientRef.current?.toggleHold()
   }, [])
 
   const callActive =
@@ -252,7 +242,15 @@ export default function App() {
             <DashboardScreen onOpenLeads={openLeads} onStartCall={startCall} />
           )}
           {view === 'plan' && (
-            <PlanScreen call={call} onStartCall={startCall} onOpenLeads={openLeads} onTestCall={startTestCall} />
+            <PlanScreen
+              call={call}
+              onStartCall={startCall}
+              onOpenLeads={openLeads}
+              onTestCall={startTestCall}
+              aiMode={aiMode}
+              onToggleAi={() => setAiMode((v) => !v)}
+              onPracticeAi={startPractice}
+            />
           )}
           {view === 'calendar' && <CalendarScreen onStartCall={startCall} />}
           {view === 'pulse' && <PulseScreen onStartCall={startCall} />}
@@ -290,8 +288,8 @@ export default function App() {
               <KeyRound className="size-4" /> Demo passcode
             </DialogTitle>
             <DialogDescription>
-              Enter the demo passcode to enable live calling. The token request is rate-limited
-              and your Telnyx credentials never leave the server.
+              Enter the demo passcode to enable live calling. Requests are rate-limited
+              and provider credentials never leave the server.
             </DialogDescription>
           </DialogHeader>
           <form

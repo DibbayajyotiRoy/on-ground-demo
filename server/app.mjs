@@ -4,6 +4,7 @@ import express from 'express'
 import rateLimit from 'express-rate-limit'
 import helmet from 'helmet'
 import { z } from 'zod'
+import { getCall, nextTwiml } from './phone-agent.mjs'
 
 dotenv.config()
 
@@ -124,11 +125,7 @@ app.post('/api/telephony/sip-credentials', (req, res) => {
 })
 
 
-// --- Twilio fallback (trial accounts dial verified numbers) ---
-
-// Trial accounts cannot <Dial> a number, but <Dial><Conference> is allowed.
-// Every leg (browser softphone and phone) runs this same TwiML and joins one conference.
-const CONFERENCE_TWIML = '<Response><Dial timeLimit="180"><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="true" waitUrl="">on-ground-demo</Conference></Dial></Response>'
+// --- Twilio (trial accounts dial verified numbers; the AI agent speaks on the phone line) ---
 
 function requirePasscode(req, res) {
   const parsed = tokenBodySchema.safeParse(req.body)
@@ -163,37 +160,10 @@ async function twilioClient() {
     : twilio(accountSid, authToken)
 }
 
-app.post('/api/twilio/token', async (req, res) => {
-  if (!requirePasscode(req, res)) return
-  const {
-    TWILIO_ACCOUNT_SID: sid,
-    TWILIO_AUTH_TOKEN: authToken,
-    TWILIO_TWIML_APP_SID: appSid,
-    TWILIO_API_KEY_SID: keySid,
-    TWILIO_API_KEY_SECRET: keySecret,
-  } = process.env
-  if (!sid || !authToken || !appSid) {
-    return res.status(503).json({ error: 'Twilio not configured' })
-  }
-  try {
-    const { default: twilio } = await import('twilio')
-    const AccessToken = twilio.jwt.AccessToken
-    // Voice SDK tokens must be signed with an API key pair when available;
-    // the account auth-token path is rejected by the gateway (20101).
-    const token = new AccessToken(sid, keySid || sid, keySecret || authToken, {
-      identity: 'on-ground-agent',
-      ttl: 3600,
-    })
-    const grant = new AccessToken.VoiceGrant({
-      outgoingApplicationSid: appSid,
-      incomingAllow: true,
-    })
-    token.addGrant(grant)
-    res.json({ token: token.toJwt() })
-  } catch {
-    res.status(500).json({ error: 'Token minting failed' })
-  }
-})
+// Public base URL that Twilio can reach (webhook URL and signature check use it).
+function publicUrl(req) {
+  return process.env.PUBLIC_URL?.replace(/\/$/, '') || `https://${req.get('host')}`
+}
 
 const phoneSchema = z.string().regex(/^\+[1-9]\d{7,14}$/)
 const callSidSchema = z.string().regex(/^CA[0-9a-f]{32}$/)
@@ -205,20 +175,17 @@ app.post('/api/twilio/dial', async (req, res) => {
     return res.status(400).json({ error: 'Invalid phone number' })
   }
   const client = await twilioClient()
-  const { TWILIO_ACCOUNT_SID: accountSid, TWILIO_TWIML_APP_SID: appSid } = process.env
-  if (!client || !appSid) {
+  if (!client) {
     return res.status(503).json({ error: 'Twilio not configured' })
   }
   try {
-    // Trial accounts accept only To + Url on call creation: no From (Twilio
-    // picks its assigned trial number), no inline Twiml, no TimeLimit. The Url
-    // is the TwiML App's public voice webhook, so local dev needs no tunnel.
+    // Trial accounts accept only To + Url on call creation: no From, no inline Twiml.
+    // Twilio fetches Url once the phone answers and then on every AI turn.
     // ponytail: a paid account must also send From (a purchased number).
-    const { voiceUrl } = await client.applications(appSid).fetch()
     const r = await client.request({
       method: 'post',
-      uri: `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
-      data: { To: to.data, Url: voiceUrl },
+      uri: `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Calls.json`,
+      data: { To: to.data, Url: `${publicUrl(req)}/api/twilio/agent` },
     })
     const body = typeof r.body === 'string' ? JSON.parse(r.body) : r.body
     if (r.statusCode >= 300) {
@@ -229,6 +196,24 @@ app.post('/api/twilio/dial', async (req, res) => {
     res.status(502).json({ error: err.message, code: err.code })
   }
 })
+
+// Twilio webhook for the AI agent: every turn of a phone call arrives here, and
+// each turn spends a Bedrock call, so only requests signed by Twilio are answered.
+async function handleAgentWebhook(req, res) {
+  const { default: twilio } = await import('twilio')
+  const valid = twilio.validateRequest(
+    process.env.TWILIO_AUTH_TOKEN ?? '',
+    req.get('x-twilio-signature') ?? '',
+    publicUrl(req) + req.originalUrl,
+    req.body,
+  )
+  if (!valid) return res.status(403).type('text/plain').send('Forbidden')
+  res.type('text/xml').send(await nextTwiml(req.body.CallSid, req.body.SpeechResult))
+}
+
+app.post('/api/twilio/agent', handleAgentWebhook)
+// The Twilio number's inbound webhook: a verified caller also reaches the agent.
+app.post('/api/twilio/voice', handleAgentWebhook)
 
 app.post('/api/twilio/call-status', async (req, res) => {
   if (!requirePasscode(req, res)) return
@@ -244,17 +229,11 @@ app.post('/api/twilio/call-status', async (req, res) => {
     const call = req.body.hangup === true
       ? await client.calls(callSid.data).update({ status: 'completed' })
       : await client.calls(callSid.data).fetch()
-    res.json({ status: call.status })
+    const { transcript = [], error } = getCall(callSid.data) ?? {}
+    res.json({ status: call.status, transcript, error })
   } catch (err) {
     res.status(502).json({ error: err.message, code: err.code })
   }
-})
-
-// Voice webhook: the TwiML App's Voice URL. Every call leg (browser and phone)
-// joins the same conference. Never reads request input, so it cannot be made to
-// dial arbitrary numbers.
-app.all('/api/twilio/voice', (_req, res) => {
-  res.type('text/xml').send(CONFERENCE_TWIML)
 })
 
 app.get('/api/health', (_req, res) => {
