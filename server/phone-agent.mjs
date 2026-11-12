@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime'
 
 // Base persona from server/agent.mjs, adapted for a text model whose reply is read
@@ -60,6 +61,30 @@ export function getCall(callSid) {
   return calls.get(callSid)
 }
 
+// Webhook capability token: Twilio sends no X-Twilio-Signature on trial accounts,
+// so the dial route puts a signed expiry in the webhook URL instead.
+const AGENT_TOKEN_TTL_MS = 15 * 60 * 1000
+
+function agentSig(exp) {
+  const key = process.env.TWILIO_AUTH_TOKEN
+  if (!key) throw new Error('TWILIO_AUTH_TOKEN is not set')
+  return createHmac('sha256', key).update(String(exp)).digest('hex')
+}
+
+export function signAgentPath(path, now = Date.now()) {
+  const exp = now + AGENT_TOKEN_TTL_MS
+  return `${path}?exp=${exp}&sig=${agentSig(exp)}`
+}
+
+export function isValidAgentQuery(query, now = Date.now()) {
+  const { exp, sig } = query ?? {}
+  if (typeof exp !== 'string' || !/^\d+$/.test(exp) || Number(exp) <= now) return false
+  if (typeof sig !== 'string' || !process.env.TWILIO_AUTH_TOKEN) return false
+  const expected = Buffer.from(agentSig(exp))
+  const given = Buffer.from(sig)
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}
+
 export function escapeXml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -79,7 +104,7 @@ function say(text) {
 }
 
 // Returns the TwiML for the next turn of a phone call.
-export async function nextTwiml(callSid, speech) {
+export async function nextTwiml(callSid, speech, actionUrl) {
   let state = calls.get(callSid)
   if (!state) {
     state = { messages: [], transcript: [], turns: 0, error: undefined }
@@ -115,5 +140,5 @@ export async function nextTwiml(callSid, speech) {
   if (ended || state.turns >= MAX_TURNS) {
     return `<Response>${say(text)}<Hangup/></Response>`
   }
-  return `<Response><Gather input="speech" language="hi-IN" speechTimeout="auto" timeout="6" actionOnEmptyResult="true" action="/api/twilio/agent" method="POST">${say(text)}</Gather></Response>`
+  return `<Response><Gather input="speech" language="hi-IN" speechTimeout="auto" timeout="6" actionOnEmptyResult="true" action="${escapeXml(actionUrl)}" method="POST">${say(text)}</Gather></Response>`
 }

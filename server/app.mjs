@@ -4,7 +4,7 @@ import express from 'express'
 import rateLimit from 'express-rate-limit'
 import helmet from 'helmet'
 import { z } from 'zod'
-import { getCall, nextTwiml } from './phone-agent.mjs'
+import { getCall, isValidAgentQuery, nextTwiml, signAgentPath } from './phone-agent.mjs'
 
 dotenv.config()
 
@@ -188,7 +188,7 @@ app.post('/api/twilio/dial', async (req, res) => {
     const r = await client.request({
       method: 'post',
       uri: `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Calls.json`,
-      data: { To: to.data, Url: `${publicUrl(req)}/api/twilio/agent` },
+      data: { To: to.data, Url: publicUrl(req) + signAgentPath('/api/twilio/agent') },
     })
     const body = typeof r.body === 'string' ? JSON.parse(r.body) : r.body
     if (r.statusCode >= 300) {
@@ -200,33 +200,20 @@ app.post('/api/twilio/dial', async (req, res) => {
   }
 })
 
-// Twilio webhook for the AI agent: every turn of a phone call arrives here, and
-// each turn spends a Bedrock call, so only requests signed by Twilio are answered.
-async function handleAgentWebhook(req, res) {
-  const { default: twilio } = await import('twilio')
-  const valid = twilio.validateRequest(
-    process.env.TWILIO_AUTH_TOKEN ?? '',
-    req.get('x-twilio-signature') ?? '',
-    publicUrl(req) + req.originalUrl,
-    req.body,
-  )
-  if (!valid) {
-    // Names only, never values: enough to diagnose a signature mismatch.
-    console.warn('twilio signature rejected', JSON.stringify({
-      url: publicUrl(req) + req.originalUrl,
-      hasSignature: !!req.get('x-twilio-signature'),
-      contentType: req.get('content-type'),
+// Twilio webhook for the AI agent: every turn spends a Bedrock call, so only
+// requests carrying the token that our dial route signed are answered.
+app.post('/api/twilio/agent', async (req, res) => {
+  if (!isValidAgentQuery(req.query)) {
+    // Names only, never values.
+    console.warn('agent webhook rejected', JSON.stringify({
+      hasExp: req.query.exp !== undefined,
+      hasSig: req.query.sig !== undefined,
       params: Object.keys(req.body ?? {}),
-      twilioHeaders: Object.keys(req.headers).filter((h) => /twilio/i.test(h)),
     }))
     return res.status(403).type('text/plain').send('Forbidden')
   }
-  res.type('text/xml').send(await nextTwiml(req.body.CallSid, req.body.SpeechResult))
-}
-
-app.post('/api/twilio/agent', handleAgentWebhook)
-// The Twilio number's inbound webhook: a verified caller also reaches the agent.
-app.post('/api/twilio/voice', handleAgentWebhook)
+  res.type('text/xml').send(await nextTwiml(req.body.CallSid, req.body.SpeechResult, req.originalUrl))
+})
 
 app.post('/api/twilio/call-status', async (req, res) => {
   if (!requirePasscode(req, res)) return
