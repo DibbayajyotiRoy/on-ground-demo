@@ -343,7 +343,7 @@ export function PlanScreen({
               download
               className="text-xs font-medium text-[#0f6e56] underline"
             >
-              Download (1 min 54 s)
+              Download
             </a>
           </div>
         </CardContent>

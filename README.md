@@ -8,23 +8,28 @@ a calendar and team chat, and the app places **real phone calls**.
 
 ## Demo: a real phone call
 
-**Recording:** [public/demo-ai-call.m4a](public/demo-ai-call.m4a) (1 min 54 s), also playable on the
+**Recording:** [public/demo-ai-call.m4a](public/demo-ai-call.m4a) (37 s), also playable on the
 live demo's Plan screen and at https://on-ground-demo.vercel.app/demo-ai-call.m4a.
 
 What it is: the app's AI agent ("Avani") phones a verified Indian mobile number through
-Twilio and holds a sales follow-up conversation in Hindi. The call ran 102 seconds: eight
-agent turns and five replies from the person called. Both voices are in the recording.
+Twilio and speaks Hindi; the person called replies and the agent responds. The recording is
+the opening of a 118-second call with the silent pauses cut out. It starts with Twilio's
+trial announcement.
 
 How it was recorded: at the handset, on speaker, with a laptop microphone. A Twilio trial
 account cannot record calls, so there is no provider-side recording (see Limitations).
 
-Excerpt from the live transcript the app showed during that call:
+The live transcript the app showed for this part of the call:
 
-> **Avani:** नमस्ते, मैं अवनी बोल रही हूँ, On-Ground डेमो स्टोर से। … क्या यह समय उपयुक्त है?
-> **Customer:** बजट!
-> **Avani:** समझ गई, आपका बजट महत्वपूर्ण है। हमारा orthopaedic mattress 25,800 रुपये में उपलब्ध है
-> या 2,150 रुपये प्रति महीने के EMI विकल्प के साथ। क्या आप स्टोर में आकर देखना चाहेंगे या घर पर
-> delivery का समय बुक करेंगे?
+> **Avani:** नमस्ते, मैं अवनि बोल रही हूँ, On-Ground demo store से। मैं आपको पिछले हफ़्ते orthopaedic
+> mattress के बारे में … कॉल कर रही हूँ।
+> **Avani:** क्षमा करें, क्या आप मुझे सुन पा रहे हैं?
+> **Customer:** हां हां!
+> **Avani:** बढ़िया। आपको mattress में सबसे ज़रूरी क्या है: बैक सपोर्ट, साइज़, बजट या डिलीवरी की तारीख?
+
+An earlier 102-second call on the same build ran eight agent turns with five transcribed
+replies, including a correct answer to a budget question (25,800 rupees, or EMI of 2,150 a
+month). That call was taken on the earpiece, so its recording has only the customer's side.
 
 ## How calling works
 
